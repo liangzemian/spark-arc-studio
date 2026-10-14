@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import os
-import pickle
 import re
 import shutil
 import threading
@@ -18,7 +17,8 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.character_store import read_character_records
-from core.utils import get_project_path
+from core.json_state import save_json_file_atomic
+from core.utils import get_project_path, safe_join
 from llm.agen_matchbox import matchbox
 from agents.language_policy import prepend_prompt_language_policy
 from story.project_files import collect_project_files
@@ -49,7 +49,6 @@ class GraphRAGBuildCancelledError(RuntimeError):
 @dataclass
 class GraphRAGArtifactPaths:
     base_dir: str
-    pickle_path: str
     graphml_path: str
     json_path: str
     metadata_path: str
@@ -83,13 +82,12 @@ class GraphRAGService:
 
     @property
     def _artifacts(self) -> GraphRAGArtifactPaths:
-        base_dir = os.path.join(self._project_path, ".graphrag")
+        base_dir = safe_join(self._project_path, ".graphrag")
         return GraphRAGArtifactPaths(
             base_dir=base_dir,
-            pickle_path=os.path.join(base_dir, "graph.pkl"),
-            graphml_path=os.path.join(base_dir, "graph.graphml"),
-            json_path=os.path.join(base_dir, "graph.json"),
-            metadata_path=os.path.join(base_dir, "meta.json"),
+            graphml_path=safe_join(base_dir, "graph.graphml"),
+            json_path=safe_join(base_dir, "graph.json"),
+            metadata_path=safe_join(base_dir, "meta.json"),
         )
 
     def _ensure_project_exists(self) -> None:
@@ -198,7 +196,7 @@ class GraphRAGService:
             return self._public_build_state(stored)
 
         artifacts = self._artifacts
-        if os.path.exists(artifacts.pickle_path) or os.path.exists(artifacts.graphml_path):
+        if os.path.exists(artifacts.json_path) or os.path.exists(artifacts.graphml_path):
             metadata = self._load_metadata()
             built_at = metadata.get("built_at", "")
             return {
@@ -755,24 +753,17 @@ class GraphRAGService:
         artifacts = self._artifacts
         os.makedirs(artifacts.base_dir, exist_ok=True)
 
-        with open(artifacts.pickle_path, "wb") as f:
-            pickle.dump(graph, f)
-
-        with open(artifacts.json_path, "w", encoding="utf-8") as f:
-            json.dump(nx.node_link_data(graph, edges="edges"), f, ensure_ascii=False, indent=2)
+        save_json_file_atomic(artifacts.json_path, nx.node_link_data(graph, edges="edges"))
 
         nx.write_graphml(graph, artifacts.graphml_path)
 
-        with open(artifacts.metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
+        save_json_file_atomic(artifacts.metadata_path, metadata)
 
     def _load_graph(self) -> nx.Graph:
         artifacts = self._artifacts
-        if os.path.exists(artifacts.pickle_path):
-            with open(artifacts.pickle_path, "rb") as f:
-                loaded = pickle.load(f)
-            if isinstance(loaded, nx.Graph):
-                return loaded
+        if os.path.exists(artifacts.json_path):
+            with open(artifacts.json_path, "r", encoding="utf-8") as f:
+                return nx.node_link_graph(json.load(f), edges="edges")
 
         if os.path.exists(artifacts.graphml_path):
             return nx.read_graphml(artifacts.graphml_path)
@@ -895,7 +886,7 @@ class GraphRAGService:
         artifacts = self._artifacts
         metadata = self._load_metadata()
         graph_ready = (
-            os.path.exists(artifacts.pickle_path)
+            os.path.exists(artifacts.json_path)
             or os.path.exists(artifacts.graphml_path)
         )
         metadata_ready = os.path.exists(artifacts.metadata_path)
@@ -981,7 +972,7 @@ class GraphRAGService:
             existing_metadata = self._load_metadata()
             artifacts = self._artifacts
             graph_ready = (
-                os.path.exists(artifacts.pickle_path)
+                os.path.exists(artifacts.json_path)
                 or os.path.exists(artifacts.graphml_path)
             )
 

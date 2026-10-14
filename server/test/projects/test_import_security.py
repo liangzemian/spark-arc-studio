@@ -96,3 +96,13 @@ def test_zip_rejects_symbolic_link_member(tmp_path):
     with zipfile.ZipFile(buffer) as archive:
         with pytest.raises(ValueError):
             routes_project._safe_extract_project_zip(archive, str(tmp_path))
+
+
+def test_import_ignores_graph_cache_but_preserves_attachments(monkeypatch, tmp_path):
+    monkeypatch.setattr(utils, "USERDATA_ROOT", str(tmp_path))
+    monkeypatch.setattr("story.importer.import_project_stories_to_db", lambda *_args, **_kwargs: {})
+    upload = _upload("项目.spark", {"世界观.txt": "正文", ".graphrag/graph.pkl": "不可信缓存", ".graphrag/character/graph.json": "{}", ".attachments/0123456789abcdef/full.txt": "附件正文"})
+    result = asyncio.run(routes_project.import_project(upload, {"user_id": "1"}))
+    root = tmp_path / "uid_1" / "projects" / result["projectName"]
+    assert not (root / ".graphrag").exists()
+    assert (root / ".attachments" / "0123456789abcdef" / "full.txt").read_text(encoding="utf-8") == "附件正文"

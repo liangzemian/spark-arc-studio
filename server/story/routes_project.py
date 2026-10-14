@@ -410,11 +410,16 @@ def _restore_project_style_snapshot(user_id: str, project_name: str, project_pat
 
 def _safe_extract_project_zip(zf: zipfile.ZipFile, target_dir: str) -> None:
     """安全解压项目包，禁止 ZIP 内路径逃逸到目标目录外。"""
+    members = []
     for member in zf.infolist():
         safe_join(target_dir, member.filename.rstrip('/'))
         if stat.S_ISLNK(member.external_attr >> 16):
             raise ValueError("项目包不能包含符号链接")
-    zf.extractall(target_dir)
+        # 图谱是派生索引，导出已排除；导入不得信任外部缓存，附件继续保留。
+        if '.graphrag' in member.filename.replace('\\', '/').split('/'):
+            continue
+        members.append(member)
+    zf.extractall(target_dir, members=members)
 
 
 # ── 导出项目 ──

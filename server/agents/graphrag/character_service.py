@@ -14,7 +14,7 @@ from langchain_core.documents import Document
 
 from core.character_store import read_character_records
 from core.json_state import save_json_file_atomic
-from core.utils import get_project_worldview_path
+from core.utils import get_project_worldview_path, safe_join
 from core.file_ingest.chunking import TokenTextSplitter
 
 from .service import GraphRAGService
@@ -31,16 +31,15 @@ class CharacterGraphService(GraphRAGService):
 
     @property
     def _artifacts(self):
-        base_dir = os.path.join(self._project_path, ".graphrag", "character")
+        base_dir = safe_join(self._project_path, ".graphrag/character")
         # 复用 GraphRAGArtifactPaths 的统一落盘格式。
         from .service import GraphRAGArtifactPaths
 
         return GraphRAGArtifactPaths(
             base_dir=base_dir,
-            pickle_path=os.path.join(base_dir, "graph.pkl"),
-            graphml_path=os.path.join(base_dir, "graph.graphml"),
-            json_path=os.path.join(base_dir, "graph.json"),
-            metadata_path=os.path.join(base_dir, "meta.json"),
+            graphml_path=safe_join(base_dir, "graph.graphml"),
+            json_path=safe_join(base_dir, "graph.json"),
+            metadata_path=safe_join(base_dir, "meta.json"),
         )
 
     def _worldview_text(self) -> str:
