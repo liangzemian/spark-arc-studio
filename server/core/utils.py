@@ -1,5 +1,30 @@
 import os
 
+
+class UnsafePathError(ValueError):
+    """调用方提供的路径超出允许范围或含有危险路径语义。"""
+
+
+def safe_join(root, relative_path, *, allow_root=False):
+    """解析目录内相对路径，同时检查实际路径，防止符号链接或目录联接逃逸。"""
+    raw = os.fspath(relative_path).replace('\\', '/')
+    parts = raw.split('/')
+    if '\x00' in raw or ':' in raw or raw.startswith('/') or '..' in parts:
+        raise UnsafePathError("路径必须是目录内的相对路径")
+    if os.name == 'nt' and any(part not in {'', '.'} and part.rstrip(' .') != part for part in parts):
+        raise UnsafePathError("路径组件不能以空格或句点结尾")
+    root_path = os.path.abspath(root)
+    candidate = os.path.abspath(os.path.join(root_path, *parts))
+    root_real = os.path.normcase(os.path.realpath(root_path))
+    candidate_real = os.path.normcase(os.path.realpath(candidate))
+    try:
+        inside = os.path.commonpath((root_real, candidate_real)) == root_real
+    except ValueError:
+        inside = False
+    if not inside or (not allow_root and candidate_real == root_real):
+        raise UnsafePathError("路径超出允许目录或指向目录本身")
+    return candidate
+
 # 一致的用户数据根目录，统一为 server/_userdata
 USERDATA_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../_userdata'))
 SYSTEM_CHARACTER_NARRATOR_ID = -1
@@ -40,10 +65,7 @@ def get_project_path(user_id, project_name):
     """获取用户特定项目的路径"""
     projects_root = os.path.abspath(get_user_projects_root(user_id))
     normalized_name = validate_project_name(project_name)
-    project_path = os.path.abspath(os.path.join(projects_root, normalized_name))
-    if os.path.commonpath((projects_root, project_path)) != projects_root:
-        raise ValueError("项目路径超出当前用户的项目目录")
-    return project_path
+    return safe_join(projects_root, normalized_name)
 
 def get_project_worldview_path(user_id, project_name):
     """获取用户特定项目的世界观文件路径"""
@@ -63,7 +85,7 @@ def get_project_outline_path(user_id, project_name):
 
 def get_project_lorebook_path(user_id, project_name, file_name):
     """获取用户特定项目的世界观文件路径"""
-    return os.path.join(get_project_path(user_id, project_name), file_name)
+    return safe_join(get_project_path(user_id, project_name), file_name)
 
 def get_worldview_file_path(project_name):
     """获取项目的世界观文件路径（用于settings_routes.py）"""

@@ -292,7 +292,10 @@ async def get_lorebook_file(
     project_name: str, file_name: str, user: dict = Depends(get_current_user)
 ):
     user_id = str(user["user_id"])
-    lorebook_path = get_project_lorebook_path(user_id, project_name, file_name)
+    try:
+        lorebook_path = get_project_lorebook_path(user_id, project_name, file_name)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
     if not os.path.exists(lorebook_path):
         return {"content": ""}
     with open(lorebook_path, "r", encoding="utf-8") as f:
@@ -309,11 +312,13 @@ async def save_lorebook_file(
     if not project_name or not file_name:
         return JSONResponse(status_code=400, content={"error": "缺少项目或文件名"})
     user_id = str(user["user_id"])
-    lorebook_path = get_project_lorebook_path(user_id, project_name, file_name)
     try:
+        lorebook_path = get_project_lorebook_path(user_id, project_name, file_name)
         with open(lorebook_path, "w", encoding="utf-8") as f:
             f.write(data.content)
         return {"success": True}
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)})
 

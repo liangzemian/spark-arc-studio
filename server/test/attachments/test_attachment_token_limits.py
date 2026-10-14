@@ -111,9 +111,10 @@ def test_prepare_chat_attachment_uses_64k_direct_injection_boundary(
     assert prepared.is_partial is expected_partial
 
 
-def test_oversized_single_attachment_injects_manifest_only() -> None:
+def test_oversized_single_attachment_injects_manifest_only(monkeypatch, tmp_path) -> None:
     """超窗单附件不预注入任何正文，只能走清单 + 滑窗。"""
     from agents.routes.chat_attachment import expand_active_context_with_attachments
+    monkeypatch.setattr("core.utils.USERDATA_ROOT", str(tmp_path))
 
     result = expand_active_context_with_attachments(
         "1",
@@ -121,7 +122,7 @@ def test_oversized_single_attachment_injects_manifest_only() -> None:
         "基础上下文",
         [
             {
-                "attachmentId": "oversized-id",
+                "attachmentId": "0123456789abcdef",
                 "filename": "超长.txt",
                 "totalTokens": 999999,
                 "isPartial": True,

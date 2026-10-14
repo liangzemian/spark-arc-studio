@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
-from core.utils import get_project_path
+from core.utils import get_project_path, safe_join
 from core.json_state import load_json_file, save_json_file_atomic
 
 
@@ -100,7 +101,9 @@ def ensure_attachments_root(user_id: str, project_name: str) -> str:
 
 def get_attachment_root(user_id: str, project_name: str, attachment_id: str) -> str:
     """返回附件目录绝对路径（不保证存在）。"""
-    return os.path.join(_attachments_root(user_id, project_name), str(attachment_id))
+    if not isinstance(attachment_id, str) or not re.fullmatch(r"[0-9a-f]{16}", attachment_id):
+        raise ValueError("附件 ID 必须是 16 位小写十六进制字符串")
+    return safe_join(get_project_path(user_id, project_name), f"{ATTACHMENTS_DIR_NAME}/{attachment_id}")
 
 
 def _meta_path(user_id: str, project_name: str, attachment_id: str) -> str:

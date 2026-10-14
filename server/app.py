@@ -21,6 +21,7 @@ os.environ.setdefault("HF_HUB_VERBOSITY", "error")
 
 from core.runtime_cache import configure_runtime_cache_environment
 from core.server_runtime import build_local_server_urls, resolve_server_binding
+from core.utils import safe_join, UnsafePathError
 
 configure_runtime_cache_environment()
 
@@ -617,31 +618,6 @@ if os.path.exists(dist_dir):
             name="assets",
         )
     
-    @app.get("/{full_path:path}")
-    async def serve_spa(request: Request, full_path: str):
-        """服务单页应用 (SPA)"""
-        # 跳过 API 和健康检查路由
-        if full_path.startswith(("api/", "health")):
-            return {"error": "Not found"}, 404
-        
-        # 检查请求的路径是否是静态文件
-        file_path = os.path.join(dist_dir, full_path)
-        if full_path and os.path.isfile(file_path):
-            return _build_cached_file_response(
-                request,
-                file_path,
-                cache_path=full_path,
-            )
-
-        # 提供 SPA 的主入口 index.html
-        index_path = os.path.join(dist_dir, 'index.html')
-        if os.path.exists(index_path):
-            return _build_cached_file_response(
-                request,
-                index_path,
-                cache_path='index.html',
-            )
-        return {"message": "SPA not found. Please build the client first."}
 else:
     @app.get("/")
     async def root():
@@ -653,6 +629,26 @@ else:
             "status": "running",
             "note": "前端文件未找到，请先构建 client"
         }
+
+
+async def serve_spa(request: Request, full_path: str):
+    """服务单页应用，仅允许访问前端构建目录内的文件。"""
+    if full_path.startswith(("api/", "health")):
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        file_path = safe_join(dist_dir, full_path, allow_root=True)
+        if full_path and os.path.isfile(file_path):
+            return _build_cached_file_response(request, file_path, cache_path=full_path)
+        index_path = safe_join(dist_dir, 'index.html')
+    except UnsafePathError:
+        raise HTTPException(status_code=404, detail="Not found")
+    if os.path.isfile(index_path):
+        return _build_cached_file_response(request, index_path, cache_path='index.html')
+    return {"message": "SPA not found. Please build the client first."}
+
+
+if os.path.exists(dist_dir):
+    app.add_api_route("/{full_path:path}", serve_spa, methods=["GET"])
 
 
 if __name__ == '__main__':
