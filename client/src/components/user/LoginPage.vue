@@ -573,7 +573,7 @@ function openLauncherForServerChange() {
     skipAutoConnect: true,
   });
 
-  window.location.replace(target || launcherOrigin);
+  if (target) window.location.replace(target);
 }
 
 function validateLogin() {

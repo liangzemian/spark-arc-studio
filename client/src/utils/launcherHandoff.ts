@@ -24,10 +24,18 @@ export type LauncherStartupHints = {
 };
 
 function normalizeAbsoluteUrl(input: string): string {
-  const raw = (input || '').trim();
+  const raw = typeof input === 'string' ? input.trim() : '';
   if (!raw) return '';
   try {
-    return new URL(raw).toString();
+    const url = new URL(raw);
+    if (url.username || url.password) return '';
+    const isWebUrl = url.protocol === 'http:' || url.protocol === 'https:';
+    const isLocalLauncher = url.protocol === 'tauri:'
+      && url.hostname === 'localhost'
+      && !url.port
+      && (!url.pathname || url.pathname === '/');
+    if (!isWebUrl && !isLocalLauncher) return '';
+    return url.toString();
   } catch {
     return '';
   }
@@ -118,8 +126,14 @@ export function buildLauncherReturnUrl(options: {
 
 export function persistLauncherResume(state: LauncherResumeState): void {
   if (typeof window === 'undefined') return;
+  const serverBase = normalizeApiBaseUrl(state.serverBase);
+  const resumeUrl = normalizeAbsoluteUrl(state.resumeUrl);
+  if (!serverBase || !resumeUrl) {
+    clearLauncherResume();
+    return;
+  }
   try {
-    localStorage.setItem(PENDING_RESUME_KEY, JSON.stringify(state));
+    localStorage.setItem(PENDING_RESUME_KEY, JSON.stringify({ ...state, serverBase, resumeUrl }));
   } catch {
     // ignore
   }
@@ -133,7 +147,10 @@ export function readLauncherResume(): LauncherResumeState | null {
     const parsed = JSON.parse(raw) as Partial<LauncherResumeState>;
     const serverBase = normalizeApiBaseUrl(parsed.serverBase || '');
     const resumeUrl = normalizeAbsoluteUrl(parsed.resumeUrl || '');
-    if (!serverBase || !resumeUrl) return null;
+    if (!serverBase || !resumeUrl) {
+      clearLauncherResume();
+      return null;
+    }
     return {
       serverBase,
       resumeUrl,
@@ -141,6 +158,7 @@ export function readLauncherResume(): LauncherResumeState | null {
       capturedAt: typeof parsed.capturedAt === 'number' ? parsed.capturedAt : Date.now(),
     };
   } catch {
+    clearLauncherResume();
     return null;
   }
 }
