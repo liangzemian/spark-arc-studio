@@ -3,10 +3,13 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 import io
+import errno
 import json
 import os
 import re
 import shutil
+import stat
+import tempfile
 import time
 import zipfile
 from datetime import datetime
@@ -22,6 +25,8 @@ from core.utils import (
     get_project_path,
     get_project_stories_path,
     get_user_projects_root,
+    validate_project_name,
+    safe_join,
 )
 from core.models import UserInfoSession, ProjectVersion, Share
 from agents.chat_manager import ChatManager
@@ -405,11 +410,10 @@ def _restore_project_style_snapshot(user_id: str, project_name: str, project_pat
 
 def _safe_extract_project_zip(zf: zipfile.ZipFile, target_dir: str) -> None:
     """安全解压项目包，禁止 ZIP 内路径逃逸到目标目录外。"""
-    target_root = os.path.abspath(target_dir)
     for member in zf.infolist():
-        destination = os.path.abspath(os.path.join(target_root, member.filename))
-        if destination != target_root and not destination.startswith(target_root + os.sep):
-            raise ValueError(f"项目包包含非法路径: {member.filename}")
+        safe_join(target_dir, member.filename.rstrip('/'))
+        if stat.S_ISLNK(member.external_attr >> 16):
+            raise ValueError("项目包不能包含符号链接")
     zf.extractall(target_dir)
 
 
@@ -479,6 +483,16 @@ async def import_project(file: UploadFile = File(...), user: dict = Depends(get_
     """从 .spark 文件导入项目（解密 → 解压 → 创建同名项目）"""
     user_id = str(user["user_id"])
 
+    # 上传名称在任何解压、目录创建与移动之前校验，保留既有命名规则。
+    upload_name = file.filename or "imported_project"
+    base_name = upload_name.rsplit(".", 1)[0] if "." in upload_name else upload_name
+    clean_name = re.sub(r"[_\-]\d{8}[_\-]?\d{0,6}$", "", base_name) or base_name
+    try:
+        clean_name = validate_project_name(normalize_project_name(clean_name) or "imported_project")
+        get_project_path(user_id, clean_name)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
+
     raw = await file.read()
     if len(raw) < _SPARK_XOR_KEY_LEN + 1:
         return JSONResponse(status_code=400, content={"success": False, "message": "无效的 .spark 文件"})
@@ -489,38 +503,40 @@ async def import_project(file: UploadFile = File(...), user: dict = Depends(get_
     zip_bytes = _xor_transform(encrypted_zip, key)
 
     # 解压到临时目录
-    tmp_dir = os.path.join(get_user_projects_root(user_id), "_spark_import_tmp")
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-    os.makedirs(tmp_dir, exist_ok=True)
+    projects_root = get_user_projects_root(user_id)
+    os.makedirs(projects_root, exist_ok=True)
+    tmp_dir = tempfile.mkdtemp(prefix=".spark-import-", dir=projects_root)
     try:
         buf = io.BytesIO(zip_bytes)
         with zipfile.ZipFile(buf, "r") as zf:
             _safe_extract_project_zip(zf, tmp_dir)
-    except (zipfile.BadZipFile, Exception) as e:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        return JSONResponse(status_code=400, content={"success": False, "message": f"解压失败: {e}"})
+    except Exception as exc:
+        shutil.rmtree(tmp_dir)
+        return JSONResponse(status_code=400, content={"success": False, "message": f"解压失败: {exc}"})
 
-    # 确定项目名：优先从上传文件名推断，去掉时间戳后缀和 .spark 扩展名
-    upload_name = file.filename or "imported_project"
-    base_name = upload_name.rsplit(".", 1)[0] if "." in upload_name else upload_name
-    # 去掉可能的时间戳后缀（格式：项目名_20260413_004000）
-    clean_name = re.sub(r"[_\-]\d{8}[_\-]?\d{0,6}$", "", base_name) or base_name
-    clean_name = normalize_project_name(clean_name)
-    if not clean_name:
-        clean_name = "imported_project"
-
-    # 同名冲突时追加后缀
-    final_name = clean_name
-    projects_root = get_user_projects_root(user_id)
-    if os.path.exists(os.path.join(projects_root, final_name)):
-        suffix = 1
-        while os.path.exists(os.path.join(projects_root, f"{clean_name}_{suffix}")):
-            suffix += 1
-        final_name = f"{clean_name}_{suffix}"
-
-    # 创建目标项目目录并复制文件
-    target_path = os.path.join(projects_root, final_name)
-    shutil.move(tmp_dir, target_path)
+    try:
+        suffix = 0
+        while True:
+            final_name = clean_name if suffix == 0 else f"{clean_name}_{suffix}"
+            target_path = get_project_path(user_id, final_name)
+            if os.path.lexists(target_path):
+                suffix += 1
+                continue
+            try:
+                # 同一文件系统内提交目录，不允许 shutil.move 将项目嵌入并发创建的目标。
+                os.rename(tmp_dir, target_path)
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EEXIST, errno.ENOTEMPTY}:
+                    raise
+                suffix += 1
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
+    except OSError as exc:
+        return JSONResponse(status_code=500, content={"success": False, "message": f"导入失败: {exc}"})
+    finally:
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
 
     # 确保目录结构完整
     ensure_project_worldview_and_character_settings(user_id, final_name)
