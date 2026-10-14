@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-import random
+import secrets
 import string
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -33,8 +33,8 @@ _CODE_LENGTH = 20
 
 
 def _generate_code(length: int = _CODE_LENGTH) -> str:
-    """生成随机兑换码。"""
-    return "".join(random.choices(_CODE_CHARS, k=length))
+    """使用系统安全随机源生成兑换码，保持既有长度和字符集。"""
+    return "".join(secrets.choice(_CODE_CHARS) for _ in range(length))
 
 
 class RedeemCodeNotFoundError(ValueError):

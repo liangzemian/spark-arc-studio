@@ -1,6 +1,7 @@
 """兑换码次数控制与管理员额度发放回归测试。"""
 
 from concurrent.futures import ThreadPoolExecutor
+import random
 from threading import Barrier
 
 import pytest
@@ -34,6 +35,20 @@ class _Services(CreditServicesMixin, CreditGrantServicesMixin, RedeemCodeService
 @pytest.fixture()
 def services(tmp_path):
     return _Services(f"sqlite:///{(tmp_path / 'credits.db').as_posix()}")
+
+
+def test_generated_codes_do_not_use_legacy_random_source(services, monkeypatch):
+    def insecure_source(*_args, **_kwargs):
+        raise AssertionError("兑换码不能使用普通伪随机源")
+
+    monkeypatch.setattr(random, "choices", insecure_source)
+    created = services.create_redeem_code(credit_amount=7, count=2)
+    codes = [item["code"] for item in created]
+    assert len(set(codes)) == 2
+    assert all(len(code) == 20 and code.isascii() and code.isalnum() and not set(code).intersection("IOlo") for code in codes)
+    with services.Session() as session:
+        assert {item.code for item in session.query(RedeemCode).all()} == set(codes)
+    assert services.redeem_code("new-user", codes[0])["new_balance"] == 7
 
 
 def test_limited_redeem_code_enforces_total_and_per_user_limits(services):
