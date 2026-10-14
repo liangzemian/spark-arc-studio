@@ -66,7 +66,7 @@ def _run_agent_stream(
             checkpoint=None,
         )
 
-    def fake_execute(_self, _tool_calls):
+    def fake_execute(_self, _tool_calls, **_kwargs):
         state["tool_calls"] += 1
         return pending_tool_results.pop(0)
 
@@ -165,7 +165,7 @@ def test_sync_pipeline_uses_the_same_single_turn_completion_protocol(monkeypatch
             checkpoint=None,
         )
 
-    def fake_execute(_self, _tool_calls):
+    def fake_execute(_self, _tool_calls, **_kwargs):
         return state["tool_results"].pop(0)
 
     monkeypatch.setattr("llm.agen_matchbox.matchbox", lambda: FakeMatchbox())

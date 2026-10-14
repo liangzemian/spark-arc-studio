@@ -695,7 +695,7 @@ def _configure_tool_event_sink_chat_stream(monkeypatch, execute_tool):
 
     monkeypatch.setattr(agent, "_set_context_checkpoint_candidate", lambda _checkpoint: None)
     monkeypatch.setattr(agent, "_build_tool_system_prompt", lambda *_args, **_kwargs: "系统提示")
-    monkeypatch.setattr(agent, "_build_runtime_tail", lambda: "")
+    monkeypatch.setattr(agent, "_build_runtime_tail", lambda **_kwargs: "")
     monkeypatch.setattr(
         agent,
         "_extract_tool_call_specs_from_message",
@@ -736,7 +736,7 @@ def _configure_tool_event_sink_chat_stream(monkeypatch, execute_tool):
 def test_chat_stream_restores_outer_tool_event_sink_after_nested_tools(monkeypatch) -> None:
     seen_sinks = []
 
-    def execute_tool(_tool_calls):
+    def execute_tool(_tool_calls, **_kwargs):
         seen_sinks.append(get_tool_event_sink())
         return "工具完成"
 
@@ -759,7 +759,7 @@ def test_chat_stream_restores_outer_tool_event_sink_after_nested_tools(monkeypat
 
 
 def test_chat_stream_restores_outer_tool_event_sink_after_tool_exception(monkeypatch) -> None:
-    def execute_tool(_tool_calls):
+    def execute_tool(_tool_calls, **_kwargs):
         raise RuntimeError("工具执行异常")
 
     agent = _configure_tool_event_sink_chat_stream(monkeypatch, execute_tool)

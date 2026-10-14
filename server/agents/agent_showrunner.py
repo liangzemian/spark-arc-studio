@@ -468,10 +468,6 @@ class ShowrunnerAgent(SparkBaseAgent, SparkAgentExecutor):
             },
         }
 
-    def _execute_tool_calls(self, tool_calls: list) -> str:
-        """执行工具调用并返回结果。"""
-        return super()._execute_tool_calls(tool_calls)
-
     def chat(self, user_message: str, history: list = None, active_context: str = None) -> str:
         """支持工具调用的对话入口。LLM 自主决定是否调用修改工具。"""
         return super().chat(user_message, history=history, active_context=active_context)

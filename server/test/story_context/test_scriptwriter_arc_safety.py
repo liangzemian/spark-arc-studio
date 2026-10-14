@@ -532,7 +532,7 @@ def test_scriptwriter_tool_results_use_clean_model_visible_arc_view(monkeypatch)
     monkeypatch.setattr(
         SparkBaseAgent,
         "_execute_tool_calls",
-        lambda self, tool_calls: dirty_tool_result,
+        lambda self, tool_calls, **_kwargs: dirty_tool_result,
     )
 
     agent = object.__new__(ScriptwriterAgent)

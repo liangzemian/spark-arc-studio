@@ -640,7 +640,7 @@ def director_node(state: DirectorState) -> Dict[str, Any]:
                         ))
                     continue
                 
-                tool_result = director._execute_tool_calls([spec])
+                tool_result = director._execute_tool_calls([spec], tools_override=tools)
 
                 if is_stop_event_set(stop_event):
                     pending_delegate = None

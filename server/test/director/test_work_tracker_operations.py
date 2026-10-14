@@ -336,7 +336,7 @@ def test_work_tracker_validation_error_identifies_operation_index(monkeypatch) -
     previous_sink = get_tool_event_sink()
     set_tool_event_sink(events)
     # 该测试只验证统一执行器的错误回执；避免加载其他正在独立注册的工具模块。
-    registry_stub = types.SimpleNamespace(TOOLS_BY_NAME={"work_tracker": work_tracker})
+    registry_stub = types.SimpleNamespace(TOOLS_BY_NAME={"work_tracker": work_tracker}, get_tools_for_agent=lambda *_args, **_kwargs: [work_tracker])
     monkeypatch.setitem(sys.modules, "agents.tools.registry", registry_stub)
     args = {
         "operations": [

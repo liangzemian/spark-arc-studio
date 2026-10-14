@@ -315,6 +315,8 @@ def get_tool_result_failure_message(tool_name: str, result: Any) -> str:
     """为前端事件生成与实际失败类型一致的简短说明。"""
     normalized = normalize_tool_name(tool_name)
     text = result if isinstance(result, str) else ""
+    if "执行失败" in text and "未授权" in text:
+        return text.strip().splitlines()[0][:200]
     if normalized == "web_search":
         if text.startswith(("联网搜索当前不可用", "联网搜索暂时不可用")):
             return "联网搜索上游暂不可用，AI 将基于失败状态继续回应"

@@ -394,9 +394,9 @@ class ScriptwriterAgent(SparkBaseAgent, SparkAgentExecutor):
             lines.append("  [角色名] = 使用角色卡中的正式角色名")
         return "\n".join(lines)
 
-    def _execute_tool_calls(self, tool_calls: list) -> str:
+    def _execute_tool_calls(self, tool_calls: list, *, tools_override: list[Any] | None = None, pipeline_mode: bool = False) -> str:
         """执行工具调用并返回结果。"""
-        result = super()._execute_tool_calls(tool_calls)
+        result = super()._execute_tool_calls(tool_calls, tools_override=tools_override, pipeline_mode=pipeline_mode)
         return self._clean_model_visible_arc_text(result)
 
     def _build_write_messages(self, *, system_prompt: str, user_prompt: str):

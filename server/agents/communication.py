@@ -963,12 +963,26 @@ class SparkBaseAgent:
 
         return "\n\n### 工具执行时必须复用的既有生成提示词\n" + "\n\n".join(blocks)
 
-    def _execute_tool_calls(self, tool_calls: list) -> str:
-        from agents.tools.registry import TOOLS_BY_NAME
+    def _execute_tool_calls(
+        self,
+        tool_calls: list,
+        *,
+        tools_override: Optional[List[Any]] = None,
+        pipeline_mode: bool = False,
+    ) -> str:
+        from agents.tools.registry import TOOLS_BY_NAME, get_tools_for_agent
         from core.request_context import current_agent_id
         import traceback
         
         sink = get_tool_event_sink()
+        allowed_tools = {
+            tool.name: tool
+            for tool in get_tools_for_agent(self.agent_id, user_id=self.user_id, pipeline_mode=pipeline_mode)
+        }
+        if tools_override is not None:
+            # 调用方只可缩小本轮工具集合，不能扩大注册表授予当前 Agent 的权限。
+            advertised_names = {tool.name for tool in tools_override}
+            allowed_tools = {name: tool for name, tool in allowed_tools.items() if name in advertised_names}
 
         results = []
         for tool_call in tool_calls:
@@ -984,7 +998,7 @@ class SparkBaseAgent:
                 tool_args = self._extract_tool_args(raw_tool_call)
 
             tool_name = normalize_tool_name(tool_name)
-            tool = TOOLS_BY_NAME.get(tool_name)
+            tool = allowed_tools.get(tool_name)
             tool_args = normalize_tool_args(tool_args, tool=tool)
             if isinstance(tool_call, dict):
                 tool_call["name"] = tool_name
@@ -1069,16 +1083,20 @@ class SparkBaseAgent:
                             tool_error=tool_error_text,
                         ))
             else:
-                results.append(f"未知工具: {tool_name}")
+                if tool_name in TOOLS_BY_NAME:
+                    tool_error_text = f"工具 {tool_name} 执行失败：当前 Agent 或调用模态未授权此工具，请使用本轮提供的工具。"
+                else:
+                    tool_error_text = f"工具 {tool_name} 执行失败：未知工具。"
+                results.append(tool_error_text)
                 if sink is not None:
                     sink.put(build_tool_stream_event(
                         "tool_exec_failed",
                         tool_name,
                         source_agent=self.agent_id,
                         tool_call_key=tool_call_key,
-                        message="模型调用了不存在的工具，正在尝试修正",
+                        message=tool_error_text,
                         tool_input=tool_args,
-                        tool_error=f"未知工具: {tool_name}",
+                        tool_error=tool_error_text,
                     ))
         
         return "\n".join(results)
@@ -1725,7 +1743,7 @@ class SparkBaseAgent:
                         tool_spec.get("name")
                         or self._extract_tool_name(tool_spec.get("raw"))
                     ))
-                    result = self._execute_tool_calls([tool_spec])
+                    result = self._execute_tool_calls([tool_spec], tools_override=tools, pipeline_mode=skip_tool_confirmation)
                     tool_results.append((tool_call_id, tool_name, result))
 
                 if stop_after_pipeline_completion:
@@ -2095,7 +2113,7 @@ class SparkBaseAgent:
                             cancelled_during_tools = True
                             break
 
-                        tool_result = self._execute_tool_calls([tool_spec])
+                        tool_result = self._execute_tool_calls([tool_spec], tools_override=tools, pipeline_mode=skip_tool_confirmation)
 
                         # 排空 sink 中的嵌套工具事件并转发给前端
                         # 过滤掉与当前主工具同名的事件（外层已显式 yield）
