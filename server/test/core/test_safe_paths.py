@@ -53,3 +53,14 @@ def test_project_path_rejects_link_to_another_user(monkeypatch, tmp_path):
     _directory_link(root / "项目", outside)
     with pytest.raises(ValueError):
         utils.get_project_path("1", "项目")
+
+
+def test_stories_root_cannot_link_outside_project(monkeypatch, tmp_path):
+    monkeypatch.setattr(utils, "USERDATA_ROOT", str(tmp_path))
+    project = Path(utils.get_project_path("1", "项目"))
+    project.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _directory_link(project / "stories", outside)
+    with pytest.raises(ValueError):
+        utils.get_project_stories_path("1", "项目")

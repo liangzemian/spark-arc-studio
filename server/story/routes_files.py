@@ -13,6 +13,8 @@ from core.utils import (
     ensure_project_stories_directory,
     get_project_stories_path,
     get_project_path,
+    safe_join,
+    UnsafePathError,
 )
 from story.arc_parser import serialize_to_arc
 from story.file_naming import (
@@ -122,7 +124,7 @@ async def get_story_files(
         user_id = str(user['user_id'])
         stories_path = ensure_project_stories_directory(user_id, project_name)
 
-        order_file = os.path.join(get_project_path(user_id, project_name), 'stories_order.json')
+        order_file = safe_join(get_project_path(user_id, project_name), 'stories_order.json')
         order_map = {}
         if os.path.exists(order_file):
             try:
@@ -194,7 +196,10 @@ async def get_story_files(
             for item in os.listdir(path):
                 if item.startswith('.'):
                     continue
-                item_path = os.path.join(path, item)
+                try:
+                    item_path = safe_join(stories_path, os.path.join(relative_path, item))
+                except UnsafePathError:
+                    continue
                 if os.path.isdir(item_path):
                     rel_dir = os.path.join(relative_path, item) if relative_path else item
                     web_dir = rel_dir.replace(os.sep, '/')
@@ -252,6 +257,7 @@ async def get_file_content(project_name: str, path: str, user: Optional[dict] = 
         user_id = str(user['user_id'])
         stories_path = get_project_stories_path(user_id, project_name)
 
+        safe_join(stories_path, path)
         resolved_path, file_format = _resolve_story_file_path(stories_path, path)
         if resolved_path:
             with open(resolved_path, 'r', encoding='utf-8') as f:
@@ -264,6 +270,8 @@ async def get_file_content(project_name: str, path: str, user: Optional[dict] = 
             }
 
         return JSONResponse(status_code=404, content={"error": "文件不存在"})
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": f"读取文件失败: {exc}"})
 
@@ -284,7 +292,8 @@ async def save_story(data: StoryData, user: dict = Depends(get_current_user)):
 
         stories_path = ensure_project_stories_directory(user_id, project_name)
 
-        normalized_filename = str(filename).replace('\\', '/').strip('/')
+        safe_join(stories_path, filename)
+        normalized_filename = str(filename).replace('\\', '/')
         file_ext = os.path.splitext(normalized_filename)[1].lower()
         if file_ext not in {'.arc', '.md'}:
             normalized_filename += '.arc'
@@ -306,6 +315,7 @@ async def save_story(data: StoryData, user: dict = Depends(get_current_user)):
                     free=True,
                 ),
             )
+        safe_join(stories_path, os.path.relpath(file_path, stories_path))
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         if file_ext == '.md':
@@ -335,6 +345,8 @@ async def save_story(data: StoryData, user: dict = Depends(get_current_user)):
             f.write(content)
 
         return {"success": True, "message": "保存成功"}
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"保存失败: {exc}"})
 
@@ -345,7 +357,7 @@ async def absorb_story_memory(data: StoryMemoryAbsorbData, user: dict = Depends(
     try:
         user_id = str(user['user_id'])
         project_name = normalize_project_name(data.projectName)
-        filename = str(data.filename or '').replace('\\', '/').strip('/')
+        filename = str(data.filename or '').replace('\\', '/')
 
         if not project_name:
             return JSONResponse(status_code=400, content={"success": False, "message": "缺少项目名称"})
@@ -374,6 +386,8 @@ async def absorb_story_memory(data: StoryMemoryAbsorbData, user: dict = Depends(
             "queued": future is not None,
             "message": "已提交记忆吸收任务",
         }
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"提交记忆吸收失败: {exc}"})
 
@@ -406,8 +420,8 @@ async def create_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
 
         stories_path = ensure_project_stories_directory(user_id, project_name)
         file_type = data.type
-        normalized_path = str(data.path or '').replace('\\', '/').strip('/')
-        file_path = os.path.join(stories_path, normalized_path)
+        normalized_path = str(data.path or '').replace('\\', '/')
+        file_path = safe_join(stories_path, normalized_path)
 
         if file_type == 'folder':
             if os.path.exists(file_path):
@@ -431,6 +445,7 @@ async def create_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
                         free=True,
                     ),
                 )
+            safe_join(stories_path, os.path.relpath(file_path, stories_path))
             if os.path.exists(file_path):
                 return JSONResponse(status_code=409, content={"success": False, "message": f"文件 '{os.path.basename(file_path)}' 已存在"})
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -445,6 +460,8 @@ async def create_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
                     pass
 
         return {"success": True, "message": "创建成功"}
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"创建失败: {exc}"})
 
@@ -459,8 +476,8 @@ async def delete_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
             return JSONResponse(status_code=400, content={"success": False, "message": "缺少项目名称"})
 
         stories_path = ensure_project_stories_directory(user_id, project_name)
-        normalized_path = str(data.path or '').replace('\\', '/').strip('/')
-        file_path = os.path.join(stories_path, normalized_path)
+        normalized_path = str(data.path or '').replace('\\', '/')
+        file_path = safe_join(stories_path, normalized_path)
         if os.path.isdir(file_path):
             shutil.rmtree(file_path)
             return {"success": True, "message": "删除成功"}
@@ -469,12 +486,15 @@ async def delete_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
         if resolved_story_path and os.path.exists(resolved_story_path):
             os.remove(resolved_story_path)
             return {"success": True, "message": "删除成功"}
-        txt_path = file_path if file_path.endswith('.txt') else file_path + '.txt'
+        txt_relative = normalized_path if normalized_path.endswith('.txt') else normalized_path + '.txt'
+        txt_path = safe_join(stories_path, txt_relative)
         if os.path.exists(txt_path):
             os.remove(txt_path)
             return {"success": True, "message": "删除成功"}
 
         return JSONResponse(status_code=404, content={"success": False, "message": "文件或文件夹不存在"})
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"删除失败: {exc}"})
 
@@ -493,7 +513,7 @@ def _extract_chapter_number(dir_rel_path: str, stories_path: str) -> Optional[in
         
     # 2. 兜底：扫描同级所有文件夹，找到自己在其中的排序索引 + 1
     parent_dir = os.path.dirname(cleaned_dir)
-    parent_abs_path = os.path.join(stories_path, parent_dir)
+    parent_abs_path = safe_join(stories_path, parent_dir, allow_root=True)
     if not os.path.exists(parent_abs_path) or not os.path.isdir(parent_abs_path):
         return None
         
@@ -524,8 +544,8 @@ async def move_file_or_folder(data: FileOperation, user: dict = Depends(get_curr
             return JSONResponse(status_code=400, content={"success": False, "message": "缺少参数"})
 
         stories_path = ensure_project_stories_directory(user_id, project_name)
-        source_path = os.path.join(stories_path, source)
-        target_path = os.path.join(stories_path, target)
+        source_path = safe_join(stories_path, source)
+        target_path = safe_join(stories_path, target)
 
         if os.path.isdir(source_path):
             target_dir = os.path.dirname(target_path)
@@ -551,6 +571,7 @@ async def move_file_or_folder(data: FileOperation, user: dict = Depends(get_curr
                     chapter_num=target_chapter_num
                 ),
             )
+            safe_join(stories_path, os.path.relpath(final_target_path, stories_path))
             os.makedirs(os.path.dirname(final_target_path), exist_ok=True)
             shutil.move(resolved_source_path, final_target_path)
             return {"success": True, "message": "移动成功"}
@@ -560,6 +581,8 @@ async def move_file_or_folder(data: FileOperation, user: dict = Depends(get_curr
             os.makedirs(target_dir, exist_ok=True)
         shutil.move(source_path, target_path)
         return {"success": True, "message": "移动成功"}
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"移动失败: {exc}"})
 
@@ -575,8 +598,8 @@ async def rename_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
             return JSONResponse(status_code=400, content={"success": False, "message": "缺少参数"})
 
         stories_path = ensure_project_stories_directory(user_id, project_name)
-        source_path = os.path.join(stories_path, old_path)
-        target_path = os.path.join(stories_path, new_path)
+        source_path = safe_join(stories_path, old_path)
+        target_path = safe_join(stories_path, new_path)
         if os.path.isdir(source_path):
             # 根目录下的章节/分卷目录名称会被 stories_order.json 引用，
             # 必须和目录重命名放在同一条可回滚链路中。
@@ -609,6 +632,7 @@ async def rename_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
                 target_dir_rel,
                 rebuild_story_filename(os.path.basename(resolved_source_path), display_name=target_display_name),
             )
+            safe_join(stories_path, os.path.relpath(final_target_path, stories_path))
             os.makedirs(os.path.dirname(final_target_path), exist_ok=True)
             shutil.move(resolved_source_path, final_target_path)
             return {"success": True, "message": "重命名成功"}
@@ -618,6 +642,8 @@ async def rename_file_or_folder(data: FileOperation, user: dict = Depends(get_cu
             os.makedirs(target_dir, exist_ok=True)
         shutil.move(source_path, target_path)
         return {"success": True, "message": "重命名成功"}
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"重命名失败: {exc}"})
 
@@ -633,16 +659,16 @@ async def save_stories_order(data: SaveOrder, user: dict = Depends(get_current_u
             return JSONResponse(status_code=400, content={"success": False, "message": "缺少项目名称"})
 
         project_path = get_project_path(user_id, project_name)
-        order_file = os.path.join(project_path, 'stories_order.json')
+        order_file = safe_join(project_path, 'stories_order.json')
         stories_path = ensure_project_stories_directory(user_id, project_name)
-        dir_abs_path = os.path.join(stories_path, dir_path)
+        dir_abs_path = safe_join(stories_path, dir_path, allow_root=True)
 
         folder_names = []
         rename_pairs: list[tuple[str, str]] = []
         if os.path.isdir(dir_abs_path):
             story_map = {}
             for item in os.listdir(dir_abs_path):
-                item_abs = os.path.join(dir_abs_path, item)
+                item_abs = safe_join(stories_path, os.path.join(dir_path, item))
                 if os.path.isdir(item_abs):
                     folder_names.append(item)
                     continue
@@ -679,6 +705,8 @@ async def save_stories_order(data: SaveOrder, user: dict = Depends(get_current_u
         with open(order_file, 'w', encoding='utf-8') as f:
             json.dump(orders, f, ensure_ascii=False, indent=2)
         return {"success": True, "message": "排序保存成功"}
+    except UnsafePathError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": f"保存排序失败: {exc}"})
 

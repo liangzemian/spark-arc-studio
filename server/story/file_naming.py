@@ -7,6 +7,8 @@ import uuid
 from collections.abc import Iterable, Mapping
 from typing import Any, Dict, Optional, Tuple
 
+from core.utils import safe_join
+
 
 # 兼容协议：chap/scene 是历史文件名元数据键，分别保存 story_group（外层
 # 物理文件夹）和 story_unit（内层正文文件）的稳定身份。它们不是用户业务
@@ -479,7 +481,7 @@ def list_story_files(
 
 
 def next_story_order(stories_path: str, relative_dir: str = "") -> int:
-    directory = os.path.join(stories_path, relative_dir) if relative_dir else stories_path
+    directory = safe_join(stories_path, relative_dir, allow_root=True)
     max_order = 0
     if not os.path.exists(directory):
         return 1
@@ -491,17 +493,18 @@ def next_story_order(stories_path: str, relative_dir: str = "") -> int:
 
 
 def resolve_story_file_path(stories_path: str, path: str) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
-    normalized_path = str(path or "").replace("\\", "/").strip("/")
+    normalized_path = str(path or "").replace("\\", "/")
     if not normalized_path:
         return None, None, None
 
-    direct_candidate = os.path.join(stories_path, normalized_path)
+    direct_candidate = safe_join(stories_path, normalized_path)
     if os.path.exists(direct_candidate) and os.path.isfile(direct_candidate):
         parsed = parse_story_filename(os.path.basename(direct_candidate))
         if parsed:
             return direct_candidate, parsed["format"], parsed
 
-    desired_dir = os.path.join(stories_path, os.path.dirname(normalized_path))
+    relative_dir = os.path.dirname(normalized_path)
+    desired_dir = safe_join(stories_path, relative_dir, allow_root=True)
     if not os.path.isdir(desired_dir):
         return None, None, None
 
@@ -518,7 +521,7 @@ def resolve_story_file_path(stories_path: str, path: str) -> Tuple[Optional[str]
             continue
         if parsed["display_name"] != desired_display:
             continue
-        actual_path = os.path.join(desired_dir, item)
+        actual_path = safe_join(stories_path, os.path.join(relative_dir, item))
         return actual_path, parsed["format"], parsed
     return None, None, None
 
@@ -582,14 +585,11 @@ def _absolute_story_path(stories_path: str, path: str, *, allow_missing: bool = 
     """解析并限制 stories 内的路径，拒绝目录穿越和 stories 本身。"""
     root = os.path.abspath(os.path.normpath(os.fspath(stories_path)))
     raw_path = os.fspath(path)
-    candidate = raw_path if os.path.isabs(raw_path) else os.path.join(root, raw_path)
-    candidate = os.path.abspath(os.path.normpath(candidate))
     try:
-        inside = os.path.commonpath((root, candidate)) == root
+        relative_path = os.path.relpath(raw_path, root) if os.path.isabs(raw_path) else raw_path
+        candidate = safe_join(root, relative_path)
     except ValueError:
-        inside = False
-    if not inside or os.path.normcase(candidate) == os.path.normcase(root):
-        raise StoryRenameConflictError(f"故事路径必须位于 stories 目录内：{path}")
+        raise StoryRenameConflictError(f"故事路径必须位于 stories 目录内：{path}") from None
     if not allow_missing and not os.path.exists(candidate):
         raise StoryRenameConflictError(f"故事文件不存在：{path}")
     return candidate

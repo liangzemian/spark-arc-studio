@@ -56,9 +56,9 @@ def validate_project_name(project_name):
     """校验并规范化项目名，禁止把路径作为项目名传入。"""
     normalized = str(project_name or '').strip()
     if not normalized:
-        raise ValueError("项目名称不能为空")
+        raise UnsafePathError("项目名称不能为空")
     if normalized in {'.', '..'} or '/' in normalized or '\\' in normalized or '\x00' in normalized:
-        raise ValueError("项目名称不能包含路径分隔符或路径跳转符")
+        raise UnsafePathError("项目名称不能包含路径分隔符或路径跳转符")
     return normalized
 
 def get_project_path(user_id, project_name):
@@ -127,7 +127,7 @@ def get_project_characters_path(user_id, project_name):
 
 def get_project_stories_path(user_id, project_name):
     """获取用户特定项目的stories目录路径"""
-    return os.path.join(get_project_path(user_id, project_name), 'stories')
+    return safe_join(get_project_path(user_id, project_name), 'stories')
 
 def ensure_project_directory(user_id, project_name):
     """确保项目目录存在"""
